@@ -11,7 +11,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import onnxruntime as ort
-import torch
+# torch 已移除: 推理用 onnxruntime(CPU), 不需要 torch (原仅用于选设备)
 from pynput import keyboard
 
 
@@ -820,7 +820,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", type=str, default=DEFAULT_XML_PATH)
     parser.add_argument("--onnx", type=str, default=DEFAULT_ONNX_PATH)
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--policy_dt", type=float, default=0.01)
     parser.add_argument("--sim_dt", type=float, default=0.005)
     parser.add_argument("--cmd_ramp_time", type=float, default=CMD_RAMP_TIME)

@@ -11,7 +11,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 import onnxruntime as ort
-import torch
+# torch 已移除: 推理用 onnxruntime(CPU), 不需要 torch (原仅用于选设备)
 from pynput import keyboard
 
 
@@ -434,7 +434,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--xml", type=str, default=RUNTIME_PRESETS[DEFAULT_POLICY_NAME]["xml_path"])
     parser.add_argument("--onnx", type=str, default=RUNTIME_PRESETS[DEFAULT_POLICY_NAME]["onnx_path"])
-    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--policy_dt", type=float, default=0.01)
     parser.add_argument("--jump_onnx", type=str, default=JUMP_XIAOFUDU_ONNX_PATH)
     parser.add_argument("--jump_policy_duration", type=float, default=JUMP_POLICY_DURATION_S)
@@ -452,14 +452,14 @@ def main():
 
     RUNTIME_PRESETS[JUMP_POLICY_NAME]["onnx_path"] = args.jump_onnx
     cmd_height = _clip_height(cmd_height)
-    device = torch.device(args.device)
+    device = args.device
 
     # Single XML load only.
     m = mujoco.MjModel.from_xml_path(args.xml)
     d = mujoco.MjData(m)
     mujoco.mj_forward(m, d)
 
-    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device.type == "cuda" else ["CPUExecutionProvider"]
+    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device == "cuda" else ["CPUExecutionProvider"]
     sess = load_onnx_session(args.onnx, providers)
     obs_name, hist_name = parse_onnx_io(sess)
     RUNTIME_PRESETS[RECOVER_POLICY_NAME]["onnx_path"] = args.onnx
