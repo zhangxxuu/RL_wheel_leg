@@ -1,0 +1,10 @@
+/home/zx/isaacgym/backup_sync.conf 的模板（复制到 ~/isaacgym/backup_sync.conf 后按需修改）
+
+# 服务器地址
+HOST="183.147.142.40"
+
+# 候选端口：实例重启换端口时把新端口加进来（脚本自动挑能连上的那个）
+PORTS="30407"
+
+# 服务器上要备份的目录
+REMOTE_DIR="/root/fudan_rl_wheel_leg/plane/"
