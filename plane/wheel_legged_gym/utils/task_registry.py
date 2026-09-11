@@ -81,6 +81,10 @@ class TaskRegistry:
         env_cfg.seed = train_cfg.seed
         return env_cfg, train_cfg
 
+    # ══ 【输出·配置快照】把这次训练用到的代码复制进 run 目录（便于日后复现）
+    #      复制: utils/terrain.py + envs/base/legged_robot{,_config}.py + envs/<task>/<task>_config.py
+    #      ⚠️ 只有首次建 run 目录时调用（train.py:46）；run 目录已存在会 mkdir 报错
+    # ────────────────────────────────────────────────────────────
     def save_cfgs(self, name) -> Tuple[LeggedRobotCfg, LeggedRobotCfgPPO]:
         os.mkdir(self.log_dir)
 
@@ -114,6 +118,9 @@ class TaskRegistry:
                 base_file_name = ntpath.basename(save_item)
                 copyfile(save_item, self.log_dir + "/" + base_file_name)
 
+    # ══ 【接口·工厂】按任务名造 env：取配置 → 命令行覆盖 → set_seed → 解析 sim_params → 实例化环境类
+    #      ⚠️ 这是“task 名 → 环境”的唯一入口；新机器人就是在这里能生效（配置里注册过即可）
+    # ────────────────────────────────────────────────────────────
     def make_env(self, name, args=None, env_cfg=None) -> Tuple[VecEnv, LeggedRobotCfg]:
         """Creates an environment either from a registered namme or from the provided config file.
 
@@ -155,6 +162,12 @@ class TaskRegistry:
         )
         return env, env_cfg
 
+    # ══ 【接口·工厂】造训练器并准备日志目录/续训
+    #      1) 生成 log_dir = logs/<experiment_name>/<月日_时分秒>_<run_name><exptid>
+    #      2) OnPolicyRunner(env, train_cfg, log_dir)
+    #      3) 若 cfg.runner.resume: get_load_path(--load_run,--checkpoint) → runner.load()
+    #      ⚠️ 每次训练都会新建 run 目录，即使 --resume 也不写回旧目录
+    # ────────────────────────────────────────────────────────────
     def make_alg_runner(
         self, env, name=None, args=None, train_cfg=None, log_root="default"
     ) -> Tuple[OnPolicyRunner, LeggedRobotCfgPPO]:

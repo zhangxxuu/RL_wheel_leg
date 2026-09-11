@@ -178,11 +178,16 @@ class ActorCriticSequence(nn.Module):
     def entropy(self):
         return self.distribution.entropy().sum(dim=-1)
 
+    # ══ 【内部】策略前向: encoder(历史)→latent，与 obs 拼接后过 actor
+    #      ⚠️ 训练时 latent 用 .detach()（actor 的梯度不回传 encoder，encoder 由 extra_optimizer 单独监督）
+    # ────────────────────────────────────────────────────────────
     def update_distribution(self, observations, observation_history):
         self.latent = self.encoder(observation_history)
         mean = self.actor(torch.cat((observations, self.latent.detach()), dim=-1))                    ############################这里     
         self.distribution = Normal(mean, mean*0. + self.std)
 
+    # ══ 【接口·训练】从分布里采样动作（探索），返回 actions(N,6)
+    # ────────────────────────────────────────────────────────────
     def act(self, observations, observation_history, **kwargs):
         self.update_distribution(observations, observation_history)
         return self.distribution.sample()
@@ -193,15 +198,23 @@ class ActorCriticSequence(nn.Module):
     def get_latent(self, **kwargs):
         return self.latent
 
+    # ══ 【接口·部署】确定性输出（取均值，不采样）→ play.py / ONNX 导出走这里
+    #      ⚠️ 实车/ONNX 必须与此一致: 入 (obs 25, obs_history 125) → 出 (actions 6, latent 3)
+    # ────────────────────────────────────────────────────────────
     def act_inference(self, observations, observation_history):
         self.latent = self.encoder(observation_history)
         actions_mean = self.actor(torch.cat((observations, self.latent), dim=-1))
         return actions_mean, self.latent
 
+    # ══ 【接口】critic 估价 V(s)：训练时入参是 privileged_obs(+latent)
+    # ────────────────────────────────────────────────────────────
     def evaluate(self, critic_observations, **kwargs):
         value = self.critic(critic_observations)
         return value
 
+    # ══ 【接口】只跑 encoder：历史(N,125) → latent(N,3)
+    #      训练里用于给 critic 补充状态估计；也是“从历史估线速度”的那条支路
+    # ────────────────────────────────────────────────────────────
     def encode(self, observation_history, **kwargs):
         latent = self.encoder(observation_history)
         return latent

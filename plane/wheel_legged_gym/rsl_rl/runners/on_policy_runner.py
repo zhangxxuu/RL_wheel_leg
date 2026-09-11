@@ -88,6 +88,11 @@ class OnPolicyRunner:
 
         _, _ = self.env.reset()
 
+    # ══ 【接口·训练总入口】每个 iteration: rollout → GAE → PPO 更新 → 日志 → 定期存盘
+    #      rollout 内层: alg.act() → env.step() → alg.process_env_step()（共 num_steps_per_env 步）
+    #      指标收集: rewbuffer/lenbuffer（最近 100 个 episode 的回报与长度）+ infos['episode']
+    #      存盘: 每 save_interval(=100) 轮存 model_{it}.pt；结束再存一次
+    # ────────────────────────────────────────────────────────────
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
@@ -180,6 +185,11 @@ class OnPolicyRunner:
             os.path.join(self.log_dir, "model_{}.pt".format(num_learning_iterations))
         )
 
+    # ══ 【输出函数】把本轮指标写到终端与 tensorboard
+    #      终端: 迭代号 / 速度 / value_loss / surrogate_loss / Mean reward / Mean length
+    #      tensorboard: Train/* (mean_reward, mean_length) 与 Episode/* (env 在 extras['episode'] 里给的每项奖励)
+    #      ⚠️ Mean reward 是“最近 100 回合”的均值，不是当前瞬时值
+    # ────────────────────────────────────────────────────────────
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
         self.tot_time += locs["collection_time"] + locs["learn_time"]
@@ -271,6 +281,10 @@ class OnPolicyRunner:
         )
         print(log_string)
 
+    # ══ 【输出·checkpoint】model_XXXX.pt 里存了什么（决定了续训能恢复什么）
+    #      model_state_dict(策略+critic权重) + optimizer_state_dict(优化器动量) + iter(当前迭代数) + infos
+    #      ⚠️ 没有存 encoder 的 extra_optimizer 状态 → 续训时 encoder 动量的恢复是不完整的
+    # ────────────────────────────────────────────────────────────
     def save(self, path, infos=None):
         torch.save(
             {
@@ -282,6 +296,9 @@ class OnPolicyRunner:
             path,
         )
 
+    # ══ 【接口·续训】从 .pt 恢复：网络权重 + 优化器 + 迭代计数（iter 决定 --max_iterations 从那往上数）
+    #      调用方: task_registry.make_alg_runner()（识别到 --resume 时）
+    # ────────────────────────────────────────────────────────────
     def load(self, path, load_optimizer=True):
         loaded_dict = torch.load(path)
         self.alg.actor_critic.load_state_dict(loaded_dict["model_state_dict"])
@@ -290,6 +307,9 @@ class OnPolicyRunner:
         self.current_learning_iteration = loaded_dict["iter"]
         return loaded_dict["infos"]
 
+    # ══ 【接口·部署】返回可直接调用的策略函数 = actor_critic.act_inference
+    #      签名: policy(obs, obs_history) → (actions, latent)；play.py 用它驱动仿真
+    # ────────────────────────────────────────────────────────────
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval()  # switch to evaluation mode (dropout for example)
         if device is not None:

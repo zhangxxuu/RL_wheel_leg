@@ -42,6 +42,8 @@ class Logger:
         self.num_episodes = 0
         self.plot_process = None
 
+    # ══ 【输出】记录一条状态序列（供 plot_states 画曲线，主要用于 debug/play）
+    # ────────────────────────────────────────────────────────────
     def log_state(self, key, value):
         self.state_log[key].append(value)
 
@@ -49,6 +51,9 @@ class Logger:
         for key, value in dict.items():
             self.log_state(key, value)
 
+    # ══ 【输出】按 episode 数加权累计各项奖励（键名含 'rew' 才记录）
+    #      与 tensorboard 的 Episode/* 是同一批数据来源
+    # ────────────────────────────────────────────────────────────
     def log_rewards(self, dict, num_episodes):
         for key, value in dict.items():
             if "rew" in key:
@@ -59,6 +64,8 @@ class Logger:
         self.state_log.clear()
         self.rew_log.clear()
 
+    # ══ 【输出】另起一个进程画图（matplotlib），不阻塞训练主循环
+    # ────────────────────────────────────────────────────────────
     def plot_states(self):
         self.plot_process = Process(target=self._plot)
         self.plot_process.start()
@@ -168,6 +175,8 @@ class Logger:
         a.legend()
         plt.show()
 
+    # ══ 【输出】把累计奖励打成表格（调试用）
+    # ────────────────────────────────────────────────────────────
     def print_rewards(self):
         print("Average rewards per second:")
         for key, values in self.rew_log.items():

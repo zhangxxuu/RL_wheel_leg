@@ -84,6 +84,13 @@ class LeggedRobot(BaseTask):
         self._prepare_reward_function()
         self.init_done = True
 
+    # ══ 【接口·核心】RL 主循环“走一步”的唯一入口
+    #      入: actions (N,6) 策略原始输出（未经缩放）
+    #      出: (obs(N,25), privileged_obs(N,141), rewards(N,), dones(N,), extras(dict), obs_history(N,125))
+    #      流程: 裁剪动作 → 动作延迟 FIFO → decimation(=2) 次物理子步(每次 _compute_torques+simulate)
+    #            → post_physics_step()（终止/奖励/复位/观测）
+    #      调用方: OnPolicyRunner.learn() 的 rollout 内层循环
+    # ────────────────────────────────────────────────────────────
     def step(self, actions):
         """Apply actions, simulate, call self.post_physics_step()
 
@@ -143,6 +150,12 @@ class LeggedRobot(BaseTask):
 
         self.last_dof_pos[:] = self.dof_pos[:]
 
+    # ══ 【内部】物理步之后的统一收尾（每控制步调用一次）
+    #      1) refresh 三个张量: root_states / contact_forces / rigid_body_state（不刷新读到的就是旧数据）
+    #      2) 派生量: base_lin_vel(位置差分→机身系)、base_ang_vel、projected_gravity、dof_acc
+    #      3) 虚拟腿正运动学: L0(腿长)、theta0(腿与竖直夹角) —— 轮腿专用状态
+    #      4) 依次: 指令重采样回调 → 终止判定 → 算奖励 → 复位 → 算观测
+    # ────────────────────────────────────────────────────────────
     def post_physics_step(self):
         """check terminations, compute observations and rewards
         calls self._post_physics_step_callback() for common computations
@@ -206,6 +219,12 @@ class LeggedRobot(BaseTask):
         if self.viewer and self.enable_viewer_sync and self.debug_viz:
             self._draw_debug_vis()
 
+    # ══ 【接口·判定】决定哪些 env 本步要复位（写入 self.reset_buf）
+    #      摔倒: 指定部位接触力>10N 或 机身倾角≈躺平(proj_grav_z>-0.1)，需【持续 fail_to_terminal_time_s=1 秒】
+    #      超时: episode_length_buf > max_episode_length(20s) → time_out_buf（⚠️ 超时不发终止奖励）
+    #      出界: 仅 heightfield/trimesh 地形时判断 x/y 越界
+    #      ⚠️ asset.terminate_after_contacts_on=[] 时，接触力这一项恒为 False
+    # ────────────────────────────────────────────────────────────
     def check_termination(self):
         """Check if environments need to be reset"""
         fail_buf = torch.any(
@@ -232,6 +251,11 @@ class LeggedRobot(BaseTask):
             | self.edge_reset_buf
         )
 
+    # ══ 【接口】复位指定的 env（部分复位，不是整场）
+    #      顺序: 课程推进(地形/速度) → 复位 dof & root → 重采样指令 → 清零缓冲
+    #      → 写 extras['episode']（episode 统计，供日志输出）与 extras['time_outs']
+    #      调用方: post_physics_step() 里根据 reset_buf 调用；play/训练启动时全量调用
+    # ────────────────────────────────────────────────────────────
     def reset_idx(self, env_ids):
         """Reset some environments.
             Calls self._reset_dofs(env_ids), self._reset_root_states(env_ids), and self._resample_commands(env_ids)
@@ -314,6 +338,11 @@ class LeggedRobot(BaseTask):
         self.last_base_pos_reward[env_ids] = self.root_states[env_ids, :2]
 
 
+    # ══ 【接口】按 _prepare_reward_function 绑定的列表逐项累加奖励
+    #      self.rew_buf (N,) = Σ scale*dt*_reward_xxx()
+    #      同时累加 self.episode_sums[名字]（整回合累计，用于课程判定与日志）
+    #      ⚠️ 权重在 config.rewards.scales；改权重不用改代码，加新奖励才需要写 _reward_xxx
+    # ────────────────────────────────────────────────────────────
     def compute_reward(self):
         """Compute rewards
         Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
@@ -338,6 +367,10 @@ class LeggedRobot(BaseTask):
             self.rew_buf += rew
             self.episode_sums["termination"] += rew
 
+    # ══ 【接口·拼观测】actor 的“机载传感器”观测 (N,25)
+    #      3 机身角速度 + 3 姿态(projected_gravity) + 3 指令 + 4 腿部关节位置 + 6 关节速度 + 6 上一步动作
+    #      ⚠️ 故意不含 base_lin_vel（真机测不准）→ 由 encoder 从历史里估计，见 ppo.py 的 extra_loss
+    # ────────────────────────────────────────────────────────────
     def compute_proprioception_observations(self):
         # note that observation noise need to modified accordingly !!!
         obs_buf = torch.cat(
@@ -358,6 +391,12 @@ class LeggedRobot(BaseTask):
         )
         return obs_buf
 
+    # ══ 【接口·核心】生成 obs / privileged_obs，并维护历史缓冲
+    #      obs_buf: 见 compute_proprioception_observations (N,25)
+    #      privileged_obs_buf: 上帝视角 (N,141)=25+77身高扫描+... 只给 critic
+    #      obs_history: 滚动窗口，把最新 obs 拼到队尾 → (N,125)=5帧×25
+    #      ⚠️ 有噪声(add_noise)在拼历史之前叠加；改观测维度必须同步 export_onnx*.py 的常量
+    # ────────────────────────────────────────────────────────────
     def compute_observations(self):
         """Computes observations"""
         self.obs_buf = self.compute_proprioception_observations()
@@ -681,6 +720,10 @@ class LeggedRobot(BaseTask):
     #     self.jump_height_int = (self.jump_height_int + self.dt * extra_h) * self.fly.float()
     #     self.base_air_time = (self.base_air_time + self.dt) * self.fly.float()
 
+    # ══ 【内部】重采样指令: vx / yaw_rate / 目标高度（每 resampling_time=5s 一次）
+    #      来源: self.command_ranges（会被“速度课程”动态放宽/收紧）
+    #      play.py 里由键盘直接改写 env.commands，绕过这里
+    # ────────────────────────────────────────────────────────────
     def _resample_commands(self, env_ids):
         """Randommly select commands of some environments
 
@@ -737,6 +780,12 @@ class LeggedRobot(BaseTask):
                 device=self.device,
             ).squeeze(1)
 
+    # ══ 【接口·控制】动作 → 关节力矩（仿真与实车的控制律都在这里）
+    #      腿: 位置控制  τ = Kp*(动作*0.5 + default_pos − dof_pos)
+    #      轮: 速度控制  τ = Kd*(动作*10.0 − dof_vel)   ← Kp=0
+    #      ⚠️ 列索引写死: 轮子=[:, [2,5]]，腿=[:, :2]/[:, 3:5]；换机器人/改 DOF 顺序必须改这里
+    #      最后 clip 到 torque_limits（来自 URDF 的 <limit effort>，缺失则力矩恒为 0！）
+    # ────────────────────────────────────────────────────────────
     def _compute_torques(self, actions):
         """Compute torques from actions.
             Actions can be interpreted as position or velocity targets given to a PD controller, or directly as scaled torques.
@@ -845,6 +894,9 @@ class LeggedRobot(BaseTask):
             gymapi.ENV_SPACE,
         )
 
+    # ══ 【课程·地形】走够 terrain_length/4 升级，跟踪奖励太差降级；到顶则随机回到某级
+    #      同时按地形类型记录 success_ids / fail_ids，供速度课程使用
+    # ────────────────────────────────────────────────────────────
     def _update_terrain_curriculum(self, env_ids):
         """Implements the game-inspired curriculum.
 
@@ -891,6 +943,10 @@ class LeggedRobot(BaseTask):
                 self.cfg.commands.basic_max_curriculum,
             )
 
+    # ══ 【课程·速度】成功地形上把速度范围逐步放宽（基础地形每轮 +0.45，高级地形 +0.05）
+    #      上限: 基础地形 basic_max_curriculum=2.5，高级地形 advanced_max_curriculum=1.5
+    #      输出: logs 里的 a_flat_max_command_x / a_stair_up_max_command_x 等指标
+    # ────────────────────────────────────────────────────────────
     def update_command_curriculum(self, env_ids):
         """Implements a curriculum of increasing commands
 
@@ -992,6 +1048,11 @@ class LeggedRobot(BaseTask):
         return noise_vec
 
     # ----------------------------------------
+    # ══ 【接口·Isaac Gym】张量获取三部曲（理解本 env 的钥匙）
+    #      ① acquire_xxx_tensor(sim) 拿句柄 → ② refresh_xxx(sim) 让仿真填数据 → ③ gymtorch.wrap_tensor 零拷贝成 torch 张量
+    #      关键张量: root_states(N,13) / dof_state(N,6,2)→dof_pos,dof_vel / contact_forces(N,bodies,3) / measured_heights(N,77)
+    #      ⚠️ 直接改这些张量 = 直接改仿真状态（复位就是这么做的）
+    # ────────────────────────────────────────────────────────────
     def _init_buffers(self):
         """Initialize torch tensors which will contain simulation states and processed quantities"""
         # get gym GPU state tensors
@@ -1262,6 +1323,10 @@ class LeggedRobot(BaseTask):
 
 
 
+    # ══ 【接口·奖励装配】把 config 里的奖励权重“接线”到同名函数
+    #      规则: 非零权重 ×dt 后保留，函数名 = _reward_<权重名>（缺失则 getattr 直接报错）
+    #      产出: self.reward_functions / self.reward_names / self.episode_sums
+    # ────────────────────────────────────────────────────────────
     def _prepare_reward_function(self):
         """Prepares a list of reward functions, whcih will be called to compute the total reward.
         Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.
@@ -1350,6 +1415,11 @@ class LeggedRobot(BaseTask):
             .to(self.device)
         )
 
+    # ══ 【接口·资产】加载 URDF、生成 N 个并行环境、建接触/足端索引
+    #      读 config.asset.file → 解析 DOF 名与顺序（DOF 顺序 = 动作/观测的顺序！）
+    #      → 调 _process_rigid_shape_props/_process_dof_props/_process_rigid_body_props 做域随机化
+    #      → find_actor_rigid_body_handle 填 feet/penalised_contact/termination_contact 索引
+    # ────────────────────────────────────────────────────────────
     def _create_envs(self):
         """Creates environments:
         1. loads the robot URDF/MJCF asset,

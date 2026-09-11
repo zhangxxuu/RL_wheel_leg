@@ -112,6 +112,9 @@ def on_release(key):
     return
 
 
+# ══ 【接口·人机】把键盘状态写进 env.commands（绕过课程的自动采样）
+#      支持: vx(w/s 或方向键) / yaw_rate(a/d) / 目标高度(x/c)；跳跃用 jump_ramp_idx 单独处理
+# ────────────────────────────────────────────────────────────
 def apply_manual_commands(env, env_cfg):
     global cmd_x, ang_vel, cmd_height
 
@@ -157,6 +160,10 @@ def apply_manual_commands(env, env_cfg):
     env.commands[jump_ids, 3] = env_cfg.commands.jump_ramp_heading
 
 
+# ══ 【入口·播放】加载 checkpoint → 开 viewer → 键盘循环
+#      与训练一致的接口: policy(obs, obs_history) → actions → env.step()
+#      注意: 这里把 num_envs 限制到 50，并关掉噪声/域随机化，便于观察
+# ────────────────────────────────────────────────────────────
 def play(args):
     global running
 

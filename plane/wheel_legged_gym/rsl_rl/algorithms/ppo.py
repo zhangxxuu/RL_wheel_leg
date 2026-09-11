@@ -98,6 +98,12 @@ class PPO:
     def train_mode(self):
         self.actor_critic.train()
 
+    # ══ 【接口】训练时的“采样动作”一步
+    #      入: obs(N,25)、obs_history(N,125)、critic_obs(N,141)
+    #      出: actions(N,6)（已 detach）
+    #      附带写入 transition: values / log_prob / mean / sigma（供 PPO 更新用）
+    #      ⚠️ 序列策略(ActorCriticSequence)会把 latent 拼到 critic_obs 后面再喂 critic
+    # ────────────────────────────────────────────────────────────
     def act(self, obs, obs_history, critic_obs):
         if self.actor_critic.is_recurrent:
             self.transition.hidden_states = self.actor_critic.get_hidden_states()
@@ -120,6 +126,10 @@ class PPO:
         self.transition.critic_observations = critic_obs.clone()
         return self.transition.actions
 
+    # ══ 【接口】把 env 返回的结果存进 rollout 缓冲
+    #      特殊处理: 超时(infos['time_outs'])时用 value 自助引导（bootstrap），避免把“时间到”误当成失败
+    #      最后 storage.add_transitions() 并清空 transition
+    # ────────────────────────────────────────────────────────────
     def process_env_step(self, rewards, dones, infos, next_obs=None):
         self.transition.rewards = rewards.clone()
         self.transition.dones = dones
@@ -137,10 +147,18 @@ class PPO:
         self.transition.clear()
         self.actor_critic.reset(dones)
 
+    # ══ 【接口】GAE 优势估计的入口（具体在 rollout_storage.compute_returns）
+    # ────────────────────────────────────────────────────────────
     def compute_returns(self, last_critic_obs):
         last_values = self.actor_critic.evaluate(last_critic_obs).detach()
         self.storage.compute_returns(last_values, self.gamma, self.lam)
 
+    # ══ 【接口·核心】PPO 更新（每轮调用一次）
+    #      主优化器: surrogate(clip=0.2) + value_loss*1.0 − entropy*0.01，梯度裁剪 1.0
+    #      自适应学习率: KL>2*desired → lr/1.5；KL<desired/2 → lr*1.5（夹在 1e-5~1e-2）
+    #      ★第二个优化器(extra_optimizer): 监督 encoder 的 latent —— 前 3 维拟合真实机身线速度，其余维度做状态去噪
+    #      返回: (mean_value_loss, mean_surrogate_loss, mean_kl, mean_extra_loss) → 全部进 tensorboard
+    # ────────────────────────────────────────────────────────────
     def update(self):
         if self.kl_decay != 0:
             self.desired_kl = max(self.desired_kl - self.kl_decay, 0.001)

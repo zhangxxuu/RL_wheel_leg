@@ -125,6 +125,10 @@ class BaseTask:
                 self.viewer, gymapi.KEY_V, "toggle_viewer_sync"
             )
 
+    # ══ 【接口】env → runner：把当前观测交给训练循环
+    #      返回: (obs_buf, obs_history)；本工程 obs=(N,25)，obs_history=(N,125)
+    #      调用方: OnPolicyRunner.learn() 每步；play.py 启动时
+    # ────────────────────────────────────────────────────────────
     def get_observations(self):
         return (
             self.obs_buf,
@@ -138,6 +142,10 @@ class BaseTask:
         """Reset selected robots"""
         raise NotImplementedError
 
+    # ══ 【接口】整场复位：所有 env 回到出生状态
+    #      实现: reset_idx(全部) → 再 step(零动作) 让缓冲刷新
+    #      返回: (obs, privileged_obs)；注意本工程 LeggedRobot 重写了该接口
+    # ────────────────────────────────────────────────────────────
     def reset(self):
         """Reset all robots"""
         self.reset_idx(torch.arange(self.num_envs, device=self.device))
@@ -148,9 +156,15 @@ class BaseTask:
         )
         return obs, privileged_obs
 
+    # ══ 【接口】抽象方法：由子类 LeggedRobot.step 实现（RL 主循环的唯一推进入口）
+    # ────────────────────────────────────────────────────────────
     def step(self, actions):
         raise NotImplementedError
 
+    # ══ 【接口】viewer 渲染 + 内置快捷键
+    #      ESC=退出进程；V=开关“画面与物理同步”（关掉可加速训练）
+    #      ⚠️ viewer 为空则直接 return（--headless 训练时就是这种）
+    # ────────────────────────────────────────────────────────────
     def render(self, sync_frame_time=True):
         if self.viewer:
             # check for window closed

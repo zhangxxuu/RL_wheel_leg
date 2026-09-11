@@ -105,6 +105,10 @@ def parse_sim_params(args, cfg):
     return sim_params
 
 
+# ══ 【接口】解析 --load_run / --checkpoint 成具体文件路径
+#      -1 = 自动选最新（run 按名字排序取最后；checkpoint 按文件名排序取最后）
+#      否则拼成 root/<load_run>/model_<checkpoint>.pt（名字必须与目录名完全一致）
+# ────────────────────────────────────────────────────────────
 def get_load_path(root, load_run=-1, checkpoint=-1):
     try:
         runs = os.listdir(root)
@@ -131,6 +135,9 @@ def get_load_path(root, load_run=-1, checkpoint=-1):
     return load_path
 
 
+# ══ 【接口】命令行参数覆盖配置文件（没有这个，--num_envs 之类就不生效）
+#      常见项: num_envs / max_iterations / resume / load_run / checkpoint / seed
+# ────────────────────────────────────────────────────────────
 def update_cfg_from_args(env_cfg, cfg_train, args):
     # seed
     if env_cfg is not None:
@@ -159,6 +166,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
     return env_cfg, cfg_train
 
 
+# ══ 【接口·命令行】所有可用参数的唯一声明处（--task 决定跑哪个注册任务）
+# ────────────────────────────────────────────────────────────
 def get_args():
     custom_parameters = [
         {
