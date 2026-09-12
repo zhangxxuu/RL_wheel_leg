@@ -144,7 +144,7 @@ class BaseTask:
 
     # ══ 【接口】整场复位：所有 env 回到出生状态
     #      实现: reset_idx(全部) → 再 step(零动作) 让缓冲刷新
-    #      返回: (obs, privileged_obs)；注意本工程 LeggedRobot 重写了该接口
+    #      返回: (obs, privileged_obs)；LeggedRobot 未重写它（用的是基类实现）
     # ────────────────────────────────────────────────────────────
     def reset(self):
         """Reset all robots"""
