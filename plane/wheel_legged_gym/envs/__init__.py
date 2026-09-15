@@ -31,6 +31,7 @@
 from wheel_legged_gym import WHEEL_LEGGED_GYM_ROOT_DIR, WHEEL_LEGGED_GYM_ENVS_DIR
 from .base.legged_robot import LeggedRobot
 from .wheel_legged.wheel_legged_config import WheelLeggedCfg, WheelLeggedCfgPPO
+from .cod_balance.cod_balance_config import CodBalanceCfg, CodBalanceCfgPPO
 
 import os
 
@@ -41,3 +42,5 @@ task_registry.register(
 )
 
 
+
+task_registry.register("cod_balance", LeggedRobot, CodBalanceCfg(), CodBalanceCfgPPO())
