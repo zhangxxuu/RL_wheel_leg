@@ -28,15 +28,6 @@ class CodBalanceCfg(LeggedRobotCfg):
         self_collisions = 1            # 关自碰撞
         flip_visual_attachments = False
 
-    # ── 奖励：先用复旦那 3 个私有轮子奖励（函数在 base/legged_robot.py 里）──
-    class rewards(LeggedRobotCfg.rewards):
-        class scales(LeggedRobotCfg.rewards.scales):
-            # ↓ 分母 = URDF 轮子 velocity=1500：两轮差要 400rad/s 才掉到 0.75，
-            #   实际工况恒为 1（纯常数偏置、零梯度），先关掉免污染 mean_reward
-            wheel_vel_abs_match    = 0.0
-            wheel_torque_abs_match = 0.5   # 分母 5N·m：两轮差 1N·m→0.85，有梯度
-            wheel_torque_smooth    = 0.5   # ★ 分母 5N·m：单轮变 0.5N·m→0.92，治抖主力
-
 
 class CodBalanceCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):

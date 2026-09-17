@@ -199,6 +199,9 @@ class LeggedRobotCfg(BaseConfig):
             torques = -0.0001 #-0.0001
             action_rate = -0.01#-0.01
             action_smooth = -0.01#-0.01
+            wheel_vel_abs_match =    0.5
+            wheel_torque_abs_match = 0.5
+            wheel_torque_smooth =    0.5
 
             collision = -1.0
             dof_pos_limits = -1.0
@@ -213,6 +216,11 @@ class LeggedRobotCfg(BaseConfig):
         soft_torque_limit = 1.0
         base_height_target = 0.18
         max_contact_force = 100.0  # forces above this value are penalized
+        # 复旦留下的 3 个 sigma：代码里并未引用（_reward_wheel_* 里硬编码 /0.25），
+        # 即死参数，调它没有任何效果；保留只为和复旦快照逐行一致
+        wheel_vel_abs_match_sigma = 0.05
+        wheel_torque_abs_match_sigma = 0.05
+        wheel_torque_smooth_sigma = 0.1
 
     class normalization:
         class obs_scales:
