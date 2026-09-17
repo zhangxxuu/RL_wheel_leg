@@ -206,6 +206,7 @@ class LeggedRobot(BaseTask):
         # compute observations, rewards, resets, ...
         self.check_termination()
         self.compute_reward()
+        self.last_wheel_torques_reward[:] = self.torques[:, self.wheel_indices]
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
         self.compute_observations()  # in some cases a simulation step might be required to refresh some obs (for example body positions)
@@ -296,6 +297,7 @@ class LeggedRobot(BaseTask):
         self.envs_steps_buf[env_ids] = 0
         self.last_dof_pos[env_ids] = self.dof_pos[env_ids]
         self.last_base_position[env_ids] = self.base_position[env_ids]
+        self.last_wheel_torques_reward[env_ids] = 0.0
         self.obs_history[env_ids] = 0
         obs_buf = self.compute_proprioception_observations()
         self.obs_history[env_ids] = obs_buf[env_ids].repeat(1, self.obs_history_length)
@@ -1128,6 +1130,41 @@ class LeggedRobot(BaseTask):
             device=self.device,
             requires_grad=False,
         )
+        # ── 轮子关节按名字定位（照复旦私有改动：不再写死 [2,5]）──
+        self.left_wheel_idx = None
+        self.right_wheel_idx = None
+        for i, name in enumerate(self.dof_names):
+            lower_name = name.lower()
+            if "wheel" not in lower_name:
+                continue
+            if self.left_wheel_idx is None and (
+                "l_wheel" in lower_name or lower_name.startswith("l")
+            ):
+                self.left_wheel_idx = i
+            elif self.right_wheel_idx is None and (
+                "r_wheel" in lower_name or lower_name.startswith("r")
+            ):
+                self.right_wheel_idx = i
+        if self.left_wheel_idx is None or self.right_wheel_idx is None:
+            raise ValueError(f"Failed to locate wheel joints in dof names: {self.dof_names}")
+        self.wheel_indices = torch.tensor(
+            [self.left_wheel_idx, self.right_wheel_idx],
+            dtype=torch.long,
+            device=self.device,
+            requires_grad=False,
+        )
+        self.wheel_vel_limit_reward = torch.clamp(
+            torch.mean(self.dof_vel_limits[self.wheel_indices]), min=1.0
+        )
+        self.wheel_torque_limits_reward = torch.clamp(
+            self.torque_limits[self.wheel_indices], min=1.0
+        )
+        self.wheel_torque_mean_limit_reward = torch.clamp(
+            torch.mean(self.wheel_torque_limits_reward), min=1.0
+        )
+        self.last_wheel_torques_reward = torch.zeros(
+            self.num_envs, 2, dtype=torch.float, device=self.device, requires_grad=False
+        )
         self.base_position = self.root_states[:, :3]
         self.last_base_position = self.base_position.clone()
         self.last_dof_pos = torch.zeros_like(self.dof_pos)
@@ -1810,6 +1847,36 @@ class LeggedRobot(BaseTask):
     def _reward_base_height_enhance(self):
         base_height_error = torch.square(self.base_height - self.commands[:, 2])
         return torch.exp(-base_height_error / 0.001 / 10) - 1
+
+    # ── 以下 3 个奖励为复旦私有新增（从 run 快照里挖出来的）──
+    def _reward_wheel_vel_abs_match(self):
+        # For in-place yaw motion, the two wheel speeds should be opposite in sign
+        # but close in magnitude.
+        left_wheel_vel = torch.abs(self.dof_vel[:, self.left_wheel_idx])
+        right_wheel_vel = torch.abs(self.dof_vel[:, self.right_wheel_idx])
+        vel_error = (left_wheel_vel - right_wheel_vel) / self.wheel_vel_limit_reward
+        return torch.exp(-torch.square(vel_error) / 0.25)
+
+    def _reward_wheel_torque_abs_match(self):
+        # Use abs torque here as well, since spinning in place usually needs
+        # symmetric magnitude instead of identical sign.
+        wheel_torques = torch.abs(self.torques[:, self.wheel_indices])
+        torque_error = (
+            wheel_torques[:, 0] - wheel_torques[:, 1]
+        ) / self.wheel_torque_mean_limit_reward
+        return torch.exp(-torch.square(torque_error) / 0.25)
+
+    def _reward_wheel_torque_smooth(self):
+        wheel_torque_delta = (
+            self.torques[:, self.wheel_indices] - self.last_wheel_torques_reward
+        ) / self.wheel_torque_limits_reward.unsqueeze(0)
+        smooth_error = torch.sum(torch.square(wheel_torque_delta), dim=1)
+        smooth_reward = torch.exp(-smooth_error / 0.25)
+        return torch.where(
+            self.episode_length_buf > 1,
+            smooth_reward,
+            torch.ones_like(smooth_reward),
+        )
 
     def _reward_torques(self):
         # Penalize torques

@@ -28,6 +28,14 @@ class CodBalanceCfg(LeggedRobotCfg):
         self_collisions = 1            # 关自碰撞
         flip_visual_attachments = False
 
+    # ── 奖励：先用复旦那 3 个私有轮子奖励（函数在 base/legged_robot.py 里）──
+    class rewards(LeggedRobotCfg.rewards):
+        class scales(LeggedRobotCfg.rewards.scales):
+            wheel_vel_abs_match    = 0.5   # 左右轮转速绝对值匹配
+            wheel_torque_abs_match = 0.5   # 左右轮力矩绝对值匹配
+            wheel_torque_smooth    = 0.5   # ★ 轮子力矩平滑（治抖）
+
+
 class CodBalanceCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         experiment_name = "cod_balance"
