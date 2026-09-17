@@ -94,10 +94,10 @@
     name="Left_front_joint"
     type="fixed">
     <origin
-      xyz="-0.01939139612421 -0.183700000000001 -0.0500000000000005"
+      xyz="0 -0.0240 0"
       rpy="0 0 0" />
     <parent
-      link="base_link" />
+      link="Left_rear_link" />
     <child
       link="Left_front_link" />
    
@@ -509,10 +509,10 @@
     name="Right_front_joint"
     type="fixed">
     <origin
-      xyz="-0.01939139612421 0.181699999999995 -0.0500000000000005"
+      xyz="0 +0.0240 0"
       rpy="0 0 0" />
     <parent
-      link="base_link" />
+      link="Right_rear_link" />
     <child
       link="Right_front_link" />
     
